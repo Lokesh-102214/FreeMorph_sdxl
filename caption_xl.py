@@ -141,10 +141,11 @@ def caption_image(
     """
     prompt = (
         f"[INST] <image>\n"
-        f"Describe the image using {num_phrases} phrases and separate the phrases using commas.\n"  # Added \n here
+        f"Describe the image using {num_phrases} phrases and separate the phrases using commas."
         f"[/INST]"
     )
-    inputs = processor(prompt, image, return_tensors="pt").to(device)
+    # FIX: Use keyword arguments explicitly
+    inputs = processor(text=prompt, images=image, return_tensors="pt").to(device)
     with torch.no_grad():
         output = model.generate(**inputs, max_new_tokens=max_new_tokens)
     decoded = processor.decode(output[0], skip_special_tokens=True)
