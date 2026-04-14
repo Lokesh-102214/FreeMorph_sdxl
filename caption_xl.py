@@ -141,7 +141,7 @@ def caption_image(
     """
     prompt = (
         f"[INST] <image>\n"
-        f"Describe the image using {num_phrases} phrases and separate the phrases using commas."
+        f"Describe the image using {num_phrases} phrases and separate the phrases using commas.\n"  # Added \n here
         f"[/INST]"
     )
     inputs = processor(prompt, image, return_tensors="pt").to(device)
@@ -151,7 +151,6 @@ def caption_image(
     # Strip the instruction prefix; only keep what comes after [/INST]
     caption = decoded.split("[/INST]")[-1].strip()
     return caption
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
