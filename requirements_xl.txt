@@ -1,0 +1,32 @@
+# FreeMorph-XL requirements
+# Install order matters: torch first (manually, see README), then these.
+
+# ── Core diffusion stack ──────────────────────────────────────────────────────
+accelerate>=0.27.0
+diffusers>=0.27.0          # SDXL pipeline support + DDIMInverseScheduler stable
+transformers>=4.38.0       # CLIPTextModelWithProjection; LLaVA-NeXT improvements
+
+# ── Scientific / image ────────────────────────────────────────────────────────
+scipy>=1.11.0              # scipy.stats.beta used in generate_beta_tensor
+scikit-image>=0.21.0
+Pillow>=10.0.0
+numpy>=1.24.0
+torchvision>=0.16.0        # save_image
+
+# ── HuggingFace Hub / model download ──────────────────────────────────────────
+huggingface_hub>=0.21.0
+safetensors>=0.4.0         # SDXL weights ship as .safetensors
+
+# ── Optional: memory-efficient attention (strongly recommended for 1024px) ────
+# Uncomment or install separately:
+# xformers==0.0.23          # pin to your torch version; see https://github.com/facebookresearch/xformers
+
+# ── Optional: 4-bit / 8-bit captioner quantisation ───────────────────────────
+# bitsandbytes>=0.42.0      # enables --load_4bit / --load_8bit in caption_xl.py
+
+# ── Tokenisation ──────────────────────────────────────────────────────────────
+sentencepiece>=0.1.99      # required by some CLIP / LLaVA tokenisers
+protobuf>=3.20.0
+
+# ── Invisible watermark (used by some SDXL pipelines) ─────────────────────────
+# invisible-watermark>=0.2.0
