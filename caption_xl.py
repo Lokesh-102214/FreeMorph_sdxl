@@ -25,7 +25,7 @@ def center_crop(im: Image) -> Image:
     return im
 
 
-def load_im_from_path(im_path: str, image_resolution: int) -> Image:
+def load_im_from_path(im_path: str) -> Image:
     image = Image.open(im_path).convert("RGB")
     image = center_crop(image)
     image = image.resize((image_resolution, image_resolution), Image.LANCZOS)
@@ -117,13 +117,18 @@ if __name__ == "__main__":
     parser.add_argument(
         '--json_path', required=True, type=str, help="path to the caption dir")
     parser.add_argument(
-        '--image_resolution', type=int, default=1024, help="square resolution used for image captioning")
-    parser.add_argument(
-        '--device', type=str, default="cuda:0", help="device for LLaVA inference, e.g. cuda:0")
+        '--output_dir', default=None, type=str,help="Override output directory for caption.json (defaults to json_path)")
     args, extras = parser.parse_known_args()
-    
-    set_seed(42)
 
+    set_seed(42)
+    image_resolution = 1024
+    print("[setup] Caption generation started")
+    print(
+        f"[setup] image_path={args.image_path} | json_path={args.json_path} | "
+        f"output_dir={args.output_dir if args.output_dir else args.json_path} | resolution={image_resolution}"
+    )
+
+    print("[setup] Loading LLaVA processor and model...")
     processor = LlavaNextProcessor.from_pretrained("llava-hf/llava-v1.6-mistral-7b-hf")
 
     model = LlavaNextForConditionalGeneration.from_pretrained(
@@ -131,10 +136,12 @@ if __name__ == "__main__":
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
     )
-    model.to(args.device)
+    model.to("cuda")
+    print("[setup] Model loaded on cuda")
 
     json_output = []
     all_images = glob.glob(f"{args.image_path}/*")
+    print(f"[run] Found {len(all_images)} images")
     for i, image_path in enumerate(tqdm(all_images)):
         idx = image_path.split('.')[-2]
         if idx.endswith('1'):
@@ -146,15 +153,15 @@ if __name__ == "__main__":
         width, height = image_0.size
         prompt = "[INST] <image>\nDescribe the image using five phrases and separate the phrases using commas.[/INST]"
         inputs = processor(
-            prompt, load_im_from_path(image_path_0, args.image_resolution), return_tensors="pt"
-        ).to(args.device)
+            prompt, load_im_from_path(image_path_0), return_tensors="pt"
+        ).to("cuda:0")
         output = model.generate(**inputs, max_new_tokens=50)
         prompt1 = processor.decode(output[0], skip_special_tokens=True)
         prompt1 = prompt1.split("[/INST]")[-1].strip()
         prompt = "[INST] <image>\nDescribe the image using five phrases and separate the phrases using commas.[/INST]"
         inputs = processor(
-            prompt, load_im_from_path(image_path_1, args.image_resolution), return_tensors="pt"
-        ).to(args.device)
+            prompt, load_im_from_path(image_path_1), return_tensors="pt"
+        ).to("cuda:0")
         output = model.generate(**inputs, max_new_tokens=50)
         prompt2 = processor.decode(output[0], skip_special_tokens=True)
         prompt2 = prompt2.split("[/INST]")[-1].strip()
@@ -168,8 +175,13 @@ if __name__ == "__main__":
                 "prompts": [prompt1, prompt2],
             }
         )
+        if (len(json_output) % 10) == 0:
+            print(f"[run] Processed {len(json_output)} caption pairs")
 
-    os.makedirs(args.json_path, exist_ok=True)
-    with open(f"{args.json_path}/caption.json", "w") as f:
+    out_dir = args.output_dir if args.output_dir else args.json_path
+    os.makedirs(out_dir, exist_ok=True)
+    print(f"[save] Writing captions to {out_dir}/caption.json")
+    with open(f"{out_dir}/caption.json", "w") as f:
         for item in json_output:
             f.write(json.dumps(item) + "\n")
+    print(f"[done] Caption generation completed with {len(json_output)} entries")
