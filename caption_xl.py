@@ -137,20 +137,41 @@ if __name__ == "__main__":
         low_cpu_mem_usage=True,
     )
     model.to("cuda")
+    if model.generation_config.pad_token_id is None:
+        model.generation_config.pad_token_id = processor.tokenizer.eos_token_id
+        print(
+            f"[setup] Set generation pad_token_id={model.generation_config.pad_token_id} "
+            f"(eos_token_id)"
+        )
     print("[setup] Model loaded on cuda")
 
     json_output = []
-    all_images = glob.glob(f"{args.image_path}/*")
-    print(f"[run] Found {len(all_images)} images")
+    all_entries = glob.glob(f"{args.image_path}/*")
+    all_images = [p for p in all_entries if os.path.isfile(p)]
+    print(f"[run] Found {len(all_entries)} entries ({len(all_images)} files)")
+    if len(all_entries) != len(all_images):
+        print(f"[run] Skipping {len(all_entries) - len(all_images)} non-file entries")
+
     for i, image_path in enumerate(tqdm(all_images)):
-        idx = image_path.split('.')[-2]
-        if idx.endswith('1'):
+        base_name = os.path.basename(image_path)
+        stem, ext = os.path.splitext(base_name)
+
+        if not ext:
+            print(f"[skip] No file extension: {image_path}")
             continue
+        if stem.endswith("1"):
+            continue
+        if not stem.endswith("_0"):
+            print(f"[skip] Unexpected naming (expected *_0): {base_name}")
+            continue
+
+        paired_stem = f"{stem[:-2]}_1"
         image_path_0 = image_path
-        image_path_1 = image_path.replace('_0', '_1')
-        image_0 = Image.open(image_path_0)
-        image_1 = Image.open(image_path_1)
-        width, height = image_0.size
+        image_path_1 = os.path.join(os.path.dirname(image_path_0), f"{paired_stem}{ext}")
+        if not os.path.exists(image_path_1):
+            print(f"[skip] Missing pair for {image_path_0}: expected {image_path_1}")
+            continue
+
         prompt = "[INST] <image>\nDescribe the image using five phrases and separate the phrases using commas.[/INST]"
         inputs = processor(
             prompt, load_im_from_path(image_path_0), return_tensors="pt"
