@@ -374,7 +374,7 @@ def aid_inversion(
 
 
 # ────────────────────────────────────────────────────────────────
-# AID Forward (UNCHANGED)
+# AID Forward 
 # ────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
@@ -399,6 +399,10 @@ def aid_forward(
     added_uncon = {"text_embeds": pooled_uncond, "time_ids": add_time_ids}
 
     for i, t in enumerate(timesteps):
+        # Mark CUDA graph step to prevent buffer reuse issues
+        if hasattr(torch.compiler, 'cudagraph_mark_step_begin'):
+            torch.compiler.cudagraph_mark_step_begin()
+        
         if i < warmup_1:
             interp_self = OuterInterpolatedAttnProcessor_SDPA(is_fused=False, t=coef_self_attn)
             interp_cross = OuterInterpolatedAttnProcessor_SDPA(is_fused=False, t=coef_cross_attn)
@@ -420,6 +424,8 @@ def aid_forward(
             encoder_hidden_states=text_input_con,
             added_cond_kwargs=added_con,
         ).sample
+        # Clone to prevent CUDA graph buffer reuse issues
+        noise_pred_cond = noise_pred_cond.clone()
 
         for m_name, m in unet.named_modules():
             if m_name.endswith(("attn1", "attn2")):
@@ -430,11 +436,9 @@ def aid_forward(
             encoder_hidden_states=text_input_uncond,
             added_cond_kwargs=added_uncon,
         ).sample
-
-        # FIX: Clone tensors to avoid CUDA graph issues with torch.compile
-        noise_pred_cond = noise_pred_cond.clone()
+        # Clone to prevent CUDA graph buffer reuse issues
         noise_pred_uncond = noise_pred_uncond.clone()
-        
+
         noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
         latent = forward_scheduler.step(
             sample=latent, model_output=noise_pred, timestep=t
