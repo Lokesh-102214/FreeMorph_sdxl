@@ -431,6 +431,10 @@ def aid_forward(
             added_cond_kwargs=added_uncon,
         ).sample
 
+        # FIX: Clone tensors to avoid CUDA graph issues with torch.compile
+        noise_pred_cond = noise_pred_cond.clone()
+        noise_pred_uncond = noise_pred_uncond.clone()
+        
         noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
         latent = forward_scheduler.step(
             sample=latent, model_output=noise_pred, timestep=t
