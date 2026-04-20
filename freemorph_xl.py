@@ -95,8 +95,8 @@ def aid_inversion(
     resolution=(1024, 1024),
 ):
     batch_size = latent.shape[0]
-    warmup_step = int(steps * 0.3)
-    warmup_step2 = int(steps * 0.6)
+    warmup_step = int(len(timesteps) * 0.3)
+    warmup_step2 = int(len(timesteps) * 0.6)
     iter_latent = latent.clone()
     print(
         f"[inversion] start | steps={len(timesteps)} | latent_batch={batch_size} | "
@@ -304,7 +304,7 @@ if __name__ == "__main__":
 
                 p_emb, p_pool, n_emb, n_pool = encode_prompt_sdxl(
                     prompts=[prompts[img_idx]],
-                    negative_prompts=[""],
+                    negative_prompts=["blurry, mutated, deformed, lowres, bad quality ,For Hands & Limbs: extra fingers, mutated hands, poorly drawn hands, malformed hands, fused fingers, missing fingers, extra limbs, extra arms, extra legs, malformed limbs, disconnected limbs, floating limbs, webbed fingers , For Faces: deformed face, poorly drawn face, disfigured, asymmetrical eyes, cross-eyed, mutated face, cloned face, double face, strange mouth, bad teeth, unnatural skin texture. For General Anatomy: bad anatomy, bad proportions, gross proportions, malformed, mutated, disfigured, long neck, dehydrated, morbid"],
                     device=device,
                     dtype=dtype_weight,
                 )
@@ -349,7 +349,7 @@ if __name__ == "__main__":
             )
 
             n_mid = interpolation_size - 2
-            base = [64, 58] + [56] * max(n_mid - 4, 0) + [58, 64]
+            base = [128, 116] + [112] * max(n_mid - 4, 0) + [116, 128]
             if len(base) < n_mid:
                 base = base + [56] * (n_mid - len(base))
             elif len(base) > n_mid:
