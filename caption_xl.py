@@ -172,18 +172,21 @@ if __name__ == "__main__":
             print(f"[skip] Missing pair for {image_path_0}: expected {image_path_1}")
             continue
 
-        prompt = "[INST] <image>\nDescribe the image using five phrases and separate the phrases using commas.[/INST]"
+        prompt = (
+            "[INST] <image>\nProvide a highly detailed, descriptive caption of this image. "
+            "Focus strictly on what is in the scene, the exact layout (e.g., 'on the left', 'in the foreground'), "
+            "and the lighting/style. Do not use conversational filler, just the description.[/INST]"
+        )
         inputs = processor(
             prompt, load_im_from_path(image_path_0), return_tensors="pt"
         ).to("cuda:0")
-        output = model.generate(**inputs, max_new_tokens=50)
+        output = model.generate(**inputs, max_new_tokens=100)
         prompt1 = processor.decode(output[0], skip_special_tokens=True)
         prompt1 = prompt1.split("[/INST]")[-1].strip()
-        prompt = "[INST] <image>\nDescribe the image using five phrases and separate the phrases using commas.[/INST]"
         inputs = processor(
             prompt, load_im_from_path(image_path_1), return_tensors="pt"
         ).to("cuda:0")
-        output = model.generate(**inputs, max_new_tokens=50)
+        output = model.generate(**inputs, max_new_tokens=100)
         prompt2 = processor.decode(output[0], skip_special_tokens=True)
         prompt2 = prompt2.split("[/INST]")[-1].strip()
         json_output.append(
