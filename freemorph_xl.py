@@ -304,7 +304,7 @@ if __name__ == "__main__":
 
                 p_emb, p_pool, n_emb, n_pool = encode_prompt_sdxl(
                     prompts=[prompts[img_idx]],
-                    negative_prompts=["blurry, mutated, deformed, lowres, bad quality ,For Hands & Limbs: extra fingers, mutated hands, poorly drawn hands, malformed hands, fused fingers, missing fingers, extra limbs, extra arms, extra legs, malformed limbs, disconnected limbs, floating limbs, webbed fingers , For Faces: deformed face, poorly drawn face, disfigured, asymmetrical eyes, cross-eyed, mutated face, cloned face, double face, strange mouth, bad teeth, unnatural skin texture. For General Anatomy: bad anatomy, bad proportions, gross proportions, malformed, mutated, disfigured, long neck, dehydrated, morbid"],
+                    negative_prompts=["blurry, mutated, deformed, lowres, bad quality"],
                     device=device,
                     dtype=dtype_weight,
                 )
