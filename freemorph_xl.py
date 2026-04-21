@@ -95,8 +95,8 @@ def aid_inversion(
     resolution=(1024, 1024),
 ):
     batch_size = latent.shape[0]
-    warmup_step = int(len(timesteps) * 0.3)
-    warmup_step2 = int(len(timesteps) * 0.6)
+    warmup_step = int(steps * 0.3)
+    warmup_step2 = int(steps * 0.6)
     iter_latent = latent.clone()
     print(
         f"[inversion] start | steps={len(timesteps)} | latent_batch={batch_size} | "
@@ -251,8 +251,8 @@ if __name__ == "__main__":
     image_resolution = 1024
     dtype_weight = torch.float16
     steps = 50
-    edit_strength = 0.8
-    guidance_scale = 7.5
+    edit_strength = 0.65
+    guidance_scale = 6.5
 
     accelerater = Accelerator()
     this_gpu = accelerater.local_process_index
@@ -351,7 +351,7 @@ if __name__ == "__main__":
             n_mid = interpolation_size - 2
             base = [128, 116] + [112] * max(n_mid - 4, 0) + [116, 128]
             if len(base) < n_mid:
-                base = base + [56] * (n_mid - len(base))
+                base = base + [112] * (n_mid - len(base))
             elif len(base) > n_mid:
                 base = base[:n_mid]
             thresholds = [None] + base + [None]
