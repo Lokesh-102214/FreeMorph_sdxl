@@ -81,6 +81,16 @@ def make_time_ids(batch_size, resolution, device, dtype):
     ids = torch.tensor([h, w, 0, 0, h, w], dtype=dtype, device=device).unsqueeze(0).repeat(batch_size, 1)
     return ids
 
+
+def _set_unet_processors(unet, self_proc, cross_proc):
+    """Set attention processors for all self-attn and cross-attn layers in one pass."""
+    for m_name, m in unet.named_modules():
+        if m_name.endswith("attn1"):
+            m.set_processor(self_proc)
+        elif m_name.endswith("attn2"):
+            m.set_processor(cross_proc)
+
+
 @torch.no_grad()
 def aid_inversion(
     timesteps: torch.Tensor,
@@ -98,35 +108,38 @@ def aid_inversion(
     warmup_step = int(steps * 0.3)
     warmup_step2 = int(steps * 0.6)
     iter_latent = latent.clone()
+
+    # FIX: cache current phase to avoid redundant set_processor calls every step
+    current_phase = -1
+
     print(
         f"[inversion] start | steps={len(timesteps)} | latent_batch={batch_size} | "
         f"resolution={resolution[0]}x{resolution[1]}"
     )
     for i, t in enumerate(timesteps):
-        if i > warmup_step and i < warmup_step2:
-            for m_name, m in unet.named_modules():
-                if m_name.endswith("attn1"):
-                    m.set_processor(OuterConvergedAttnProcessor_SDPA())
-            for m_name, m in unet.named_modules():
-                if m_name.endswith("attn2"):
-                    m.set_processor(OuterConvergedAttnProcessor_SDPA())
-        elif i > warmup_step2:
-            for m_name, m in unet.named_modules():
-                if m_name.endswith("attn1"):
-                    m.set_processor(OuterConvergedAttnProcessor_SDPA2(is_fused=False))
-            for m_name, m in unet.named_modules():
-                if m_name.endswith("attn2"):
-                    m.set_processor(OuterConvergedAttnProcessor_SDPA2(is_fused=False))
+        # Determine phase: 0=warmup, 1=converged, 2=converged2
+        if i <= warmup_step:
+            phase = 0
+        elif i <= warmup_step2:
+            phase = 1
         else:
-            for m_name, m in unet.named_modules():
-                if m_name.endswith("attn1"):
-                    m.set_processor(AttnProcessor2_0())
-            for m_name, m in unet.named_modules():
-                if m_name.endswith("attn2"):
-                    m.set_processor(AttnProcessor2_0())
+            phase = 2
+
+        # Only re-set processors when phase actually changes
+        if phase != current_phase:
+            current_phase = phase
+            if phase == 1:
+                proc = OuterConvergedAttnProcessor_SDPA()
+                _set_unet_processors(unet, proc, proc)
+            elif phase == 2:
+                proc = OuterConvergedAttnProcessor_SDPA2(is_fused=False)
+                _set_unet_processors(unet, proc, proc)
+            else:
+                default = AttnProcessor2_0()
+                _set_unet_processors(unet, default, default)
 
         if i in {0, warmup_step, warmup_step2, len(timesteps) - 1}:
-            print(f"[inversion] step {i + 1}/{len(timesteps)} | t={int(t)}")
+            print(f"[inversion] step {i + 1}/{len(timesteps)} | t={int(t)} | phase={phase}")
 
         time_ids = make_time_ids(batch_size, resolution, latent.device, latent.dtype)
         added_cond_kwargs_con = {
@@ -163,56 +176,63 @@ def aid_forward(
     batch_size = latent.shape[0]
     warmup_step1 = int(len(timesteps) * 0.2)
     warmup_step2 = int(len(timesteps) * 0.6)
+
+    # FIX: cache phase to avoid redundant set_processor calls on every step
+    current_phase = -1
+
+    # Pre-build the default processor once; reuse across all uncond passes
+    default_proc = AttnProcessor2_0()
+
     print(
         f"[forward] start | steps={len(timesteps)} | latent_batch={batch_size} | "
         f"resolution={resolution[0]}x{resolution[1]}"
     )
     for i, t in enumerate(timesteps):
         if i < warmup_step1:
-            interpolate_attn_proc = {
-                "self_attn": OuterInterpolatedAttnProcessor_SDPA(is_fused=False, t=coef_self_attn),
-                "cross_attn": OuterInterpolatedAttnProcessor_SDPA(is_fused=False, t=coef_cross_attn),
-            }
+            phase = 0
         elif i < warmup_step2:
-            interpolate_attn_proc = {
-                "self_attn": OuterInterpolatedAttnProcessor_SDPA(is_fused=True, t=coef_self_attn),
-                "cross_attn": OuterInterpolatedAttnProcessor_SDPA(is_fused=True, t=coef_cross_attn),
-            }
+            phase = 1
         else:
-            interpolate_attn_proc = {
-                "self_attn": AttnProcessor2_0(),
-                "cross_attn": AttnProcessor2_0(),
-            }
-        for m_name, m in unet.named_modules():
-            if m_name.endswith("attn1"):
-                m.set_processor(interpolate_attn_proc["self_attn"])
-            if m_name.endswith("attn2"):
-                m.set_processor(interpolate_attn_proc["cross_attn"])
+            phase = 2
+
+        # Only rebuild & re-set interpolated processors when phase changes
+        if phase != current_phase:
+            current_phase = phase
+            if phase == 0:
+                cond_self_proc = OuterInterpolatedAttnProcessor_SDPA(is_fused=False, t=coef_self_attn)
+                cond_cross_proc = OuterInterpolatedAttnProcessor_SDPA(is_fused=False, t=coef_cross_attn)
+            elif phase == 1:
+                cond_self_proc = OuterInterpolatedAttnProcessor_SDPA(is_fused=True, t=coef_self_attn)
+                cond_cross_proc = OuterInterpolatedAttnProcessor_SDPA(is_fused=True, t=coef_cross_attn)
+            else:
+                cond_self_proc = default_proc
+                cond_cross_proc = default_proc
 
         if i in {0, warmup_step1, warmup_step2, len(timesteps) - 1}:
-            print(f"[forward] step {i + 1}/{len(timesteps)} | t={int(t)}")
+            print(f"[forward] step {i + 1}/{len(timesteps)} | t={int(t)} | phase={phase}")
 
         time_ids = make_time_ids(batch_size, resolution, latent.device, latent.dtype)
         added_cond_con = {"text_embeds": pooled_con, "time_ids": time_ids}
         added_cond_uncon = {"text_embeds": pooled_uncond, "time_ids": time_ids}
 
+        # --- Conditional pass (interpolated attention) ---
+        _set_unet_processors(unet, cond_self_proc, cond_cross_proc)
         noise_pred_cond = unet(
             latent,
             t,
             encoder_hidden_states=text_input_con,
             added_cond_kwargs=added_cond_con,
         ).sample
-        for m_name, m in unet.named_modules():
-            if m_name.endswith("attn1"):
-                m.set_processor(AttnProcessor2_0())
-            if m_name.endswith("attn2"):
-                m.set_processor(AttnProcessor2_0())
+
+        # --- Unconditional pass (default attention) ---
+        _set_unet_processors(unet, default_proc, default_proc)
         noise_pred_uncond = unet(
             latent,
             t,
             encoder_hidden_states=text_input_uncond,
             added_cond_kwargs=added_cond_uncon,
         ).sample
+
         noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
         latent = forward_scheduler.step(sample=latent, model_output=noise_pred, timestep=t).prev_sample
     print("[forward] done")
@@ -251,7 +271,8 @@ if __name__ == "__main__":
     image_resolution = 1024
     dtype_weight = torch.float16
     steps = 50
-    edit_strength = 0.65
+    # FIX: slightly lower edit_strength preserves more structure for style-only morphing
+    edit_strength = 0.60
     guidance_scale = 6.5
 
     accelerater = Accelerator()
@@ -316,7 +337,11 @@ if __name__ == "__main__":
                 latent_x = vae.encode(image).latent_dist.sample() * vae.config.scaling_factor
                 latent_x_list.append(latent_x)
 
-            print(f"[sample {idx}] encoded images and prompts")
+            # FIX: offload text encoders to CPU after encoding — frees VRAM for batched UNet
+            text_encoder.to("cpu")
+            text_encoder_2.to("cpu")
+            torch.cuda.empty_cache()
+            print(f"[sample {idx}] encoded images/prompts; text encoders offloaded to CPU")
 
             coef_attn = generate_beta_tensor(interpolation_size, alpha=20, beta=20)
             latent_x = spherical_interpolation(latent_x_list[0], latent_x_list[1], interpolation_size).squeeze(0)
@@ -349,11 +374,32 @@ if __name__ == "__main__":
             )
 
             n_mid = interpolation_size - 2
-            base = [128, 116] + [112] * max(n_mid - 4, 0) + [116, 128]
-            if len(base) < n_mid:
-                base = base + [112] * (n_mid - len(base))
-            elif len(base) > n_mid:
-                base = base[:n_mid]
+
+            # FIX: raised Fourier thresholds significantly for style-only morphing.
+            # Original values (112-128) were replacing too much low-freq structure with noise,
+            # causing ghost objects in middle frames. Higher values (210-250) preserve the
+            # structural low-frequency content while still allowing style to interpolate.
+            # Threshold scale: endpoints=None (untouched), near-endpoints=250, middle=210.
+            if n_mid <= 0:
+                base = []
+            elif n_mid == 1:
+                base = [220]
+            elif n_mid == 2:
+                base = [240, 240]
+            else:
+                # Symmetric ramp: high at edges (close to endpoints), lower in the middle
+                near_end = 250
+                mid_val = 210
+                half = n_mid // 2
+                ramp_down = [near_end - int((near_end - mid_val) * k / max(half - 1, 1)) for k in range(half)]
+                ramp_up = ramp_down[::-1]
+                if n_mid % 2 == 1:
+                    base = ramp_down + [mid_val] + ramp_up
+                else:
+                    base = ramp_down + ramp_up
+                # Safety: ensure correct length
+                base = (base + [mid_val] * n_mid)[:n_mid]
+
             thresholds = [None] + base + [None]
 
             new_input_latents_list = []
@@ -397,5 +443,9 @@ if __name__ == "__main__":
             out_path = f"{save_dir}/{exp_id}.png"
             save_image(torch.cat(images), out_path)
             print(f"[sample {idx}] saved -> {out_path}")
+
+            # Reload text encoders back to GPU for next sample
+            text_encoder.to(device)
+            text_encoder_2.to(device)
 
     print("[done] FreeMorph generation completed")
